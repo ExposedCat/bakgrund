@@ -1,5 +1,6 @@
 {
   "tasks": {
+    "start": "deno run --allow-run=busctl --allow-net main.ts",
     "check": "deno fmt --check && deno lint && deno check main.ts"
   }
 }
