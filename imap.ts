@@ -16,6 +16,16 @@ export type ImapFolder = {
   attributes: string[];
 };
 
+export type ImapMessage = {
+  uid: number;
+  sequence: number;
+  flags: string[];
+  from?: string;
+  subject?: string;
+  date?: string;
+  messageId?: string;
+};
+
 type ImapConn = Deno.Conn | Deno.TlsConn;
 
 type ImapState = {
@@ -60,6 +70,38 @@ export async function listFolders(
     .filter((folder) => folder !== undefined);
 }
 
+export async function listUnreadMessages(
+  connection: ImapConnectionId,
+  folder: string,
+): Promise<ImapMessage[]> {
+  const state = getConnection(connection);
+
+  expectOk(await imapCommand(state, `EXAMINE ${quoteString(folder)}`));
+
+  const search = expectOk(await imapCommand(state, "UID SEARCH UNSEEN"));
+  const uids = search.lines
+    .find((line) => line.startsWith("* SEARCH "))
+    ?.slice("* SEARCH ".length)
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean) ?? [];
+
+  if (uids.length === 0) {
+    return [];
+  }
+
+  const fetch = expectOk(
+    await imapCommand(
+      state,
+      `UID FETCH ${
+        uids.join(",")
+      } (UID FLAGS BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])`,
+    ),
+  );
+
+  return parseMessages(fetch.lines);
+}
+
 export async function close(connection: ImapConnectionId): Promise<void> {
   const state = connections.get(connection);
 
@@ -96,13 +138,6 @@ function registerCleanup(): void {
 
   cleanupRegistered = true;
   globalThis.addEventListener("unload", closeAllConnections);
-
-  for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    Deno.addSignalListener(signal, () => {
-      closeAllConnections();
-      Deno.exit(signal === "SIGINT" ? 130 : 143);
-    });
-  }
 }
 
 async function connectClient(
@@ -284,6 +319,83 @@ function parseListLine(line: string): ImapFolder | undefined {
     delimiter: match[2] ?? null,
     name: match[3].replaceAll('\\"', '"'),
   };
+}
+
+function parseMessages(lines: string[]): ImapMessage[] {
+  const messages: ImapMessage[] = [];
+  let current: string[] = [];
+
+  for (const line of lines) {
+    if (/^\* \d+ FETCH /.test(line)) {
+      if (current.length > 0) {
+        messages.push(parseMessage(current));
+      }
+
+      current = [line];
+      continue;
+    }
+
+    if (current.length > 0) {
+      current.push(line);
+    }
+  }
+
+  if (current.length > 0) {
+    messages.push(parseMessage(current));
+  }
+
+  return messages;
+}
+
+function parseMessage(lines: string[]): ImapMessage {
+  const first = lines[0] ?? "";
+  const sequence = Number(/^\* (\d+) FETCH /.exec(first)?.[1] ?? 0);
+  const uid = Number(/\bUID (\d+)\b/.exec(first)?.[1] ?? 0);
+  const flags = /\bFLAGS \(([^)]*)\)/.exec(first)?.[1]
+    ?.split(" ")
+    .filter(Boolean) ?? [];
+  const headers = parseHeaders(lines.slice(1).join("\r\n"));
+
+  return {
+    uid,
+    sequence,
+    flags,
+    from: headers.get("from"),
+    subject: headers.get("subject"),
+    date: headers.get("date"),
+    messageId: headers.get("message-id"),
+  };
+}
+
+function parseHeaders(value: string): Map<string, string> {
+  const headers = new Map<string, string>();
+  let current = "";
+
+  for (const line of value.split(/\r?\n/)) {
+    if (line === ")" || line === "") {
+      continue;
+    }
+
+    if (/^\s/.test(line) && current) {
+      headers.set(current, `${headers.get(current) ?? ""} ${line.trim()}`);
+      continue;
+    }
+
+    const index = line.indexOf(":");
+
+    if (index === -1) {
+      continue;
+    }
+
+    current = line.slice(0, index).toLowerCase();
+    headers.set(current, line.slice(index + 1).trim());
+  }
+
+  return headers;
+}
+
+function quoteString(value: string): string {
+  return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
 
 function xoauth2InitialResponse(username: string, accessToken: string): string {

@@ -1,5 +1,5 @@
 import { getGoaAccessTokens, type GoaAccessToken } from "./goa.ts";
-import { close, connect, listFolders } from "./imap.ts";
+import { close, connect, listFolders, listUnreadMessages } from "./imap.ts";
 
 export type ServerOptions = {
   hostname?: string;
@@ -26,12 +26,13 @@ export async function handleRequest(request: Request): Promise<Response> {
       return json(accounts.map(publicAccount));
     }
 
-    const foldersMatch = /^\/accounts\/([^/]+)\/folders$/.exec(url.pathname);
+    const messagesMatch = /^\/accounts\/([^/]+)\/folders\/([^/]+)\/messages$/
+      .exec(url.pathname);
 
-    if (foldersMatch) {
-      const email = decodeURIComponent(foldersMatch[1]);
-      const accounts = await getGoaAccessTokens();
-      const account = accounts.find((item) => item.email === email);
+    if (messagesMatch) {
+      const email = decodeURIComponent(messagesMatch[1]);
+      const folder = decodeURIComponent(messagesMatch[2]);
+      const account = await findAccount(email);
 
       if (!account) {
         return json({ error: "account not found" }, 404);
@@ -49,7 +50,44 @@ export async function handleRequest(request: Request): Promise<Response> {
           accessToken: account.accessToken,
         });
 
-        return json(await listFolders(connection));
+        return json(await listUnreadMessages(connection, folder));
+      } finally {
+        if (connection) {
+          await close(connection);
+        }
+      }
+    }
+
+    const foldersMatch = /^\/accounts\/([^/]+)\/folders$/.exec(url.pathname);
+
+    if (foldersMatch) {
+      const email = decodeURIComponent(foldersMatch[1]);
+      const account = await findAccount(email);
+
+      if (!account) {
+        return json({ error: "account not found" }, 404);
+      }
+
+      if (!account.imap) {
+        return json({ error: "account has no imap settings" }, 422);
+      }
+
+      let connection: string | undefined;
+
+      try {
+        connection = await connect({
+          ...account.imap,
+          accessToken: account.accessToken,
+        });
+
+        const folders = await listFolders(connection);
+
+        return json(folders.map((folder) => ({
+          ...folder,
+          messages: `/accounts/${encodeURIComponent(account.email)}/folders/${
+            encodeURIComponent(folder.name)
+          }/messages`,
+        })));
       } finally {
         if (connection) {
           await close(connection);
@@ -63,6 +101,11 @@ export async function handleRequest(request: Request): Promise<Response> {
       error: error instanceof Error ? error.message : String(error),
     }, 500);
   }
+}
+
+async function findAccount(email: string): Promise<GoaAccessToken | undefined> {
+  const accounts = await getGoaAccessTokens();
+  return accounts.find((item) => item.email === email);
 }
 
 function publicAccount(account: GoaAccessToken) {
