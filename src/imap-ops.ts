@@ -80,13 +80,12 @@ export async function getMessage(
   return parseMessageDetail(fetch.lines);
 }
 
-export async function markUnreadMessagesRead(
+export async function markMessagesRead(
   connection: ImapConnectionId,
   folder: string,
+  uids: number[],
 ): Promise<ImapMarkReadResult> {
   expectOk(await command(connection, `SELECT ${quoteString(folder)}`));
-
-  const uids = await searchUnreadUids(connection);
 
   if (uids.length > 0) {
     expectOk(
@@ -100,7 +99,7 @@ export async function markUnreadMessagesRead(
   return {
     folder,
     markedRead: uids.length,
-    uids: uids.map(Number),
+    uids,
   };
 }
 

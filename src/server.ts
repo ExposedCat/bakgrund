@@ -1,3 +1,4 @@
+import { analyzeEmailMessage } from "./analyzer.ts";
 import { getGoaAccessTokens, type GoaAccessToken } from "./goa.ts";
 import {
   getMessage,
@@ -5,7 +6,7 @@ import {
   type ImapMessageDetail,
   listFolders,
   listUnreadMessages,
-  markUnreadMessagesRead,
+  markMessagesRead,
 } from "./imap-ops.ts";
 import { close, connect } from "./imap.ts";
 
@@ -79,6 +80,55 @@ export async function handleRequest(request: Request): Promise<Response> {
       }
     }
 
+    if (request.method === "POST" && messageMatch) {
+      const email = decodeURIComponent(messageMatch[1]);
+      const folder = decodeURIComponent(messageMatch[2]);
+      const uid = Number(decodeURIComponent(messageMatch[3]));
+      await readMessageAction(request);
+
+      if (!Number.isInteger(uid) || uid < 1) {
+        return json({ error: "invalid message uid" }, 400);
+      }
+
+      const account = await findAccount(email);
+
+      if (!account) {
+        return json({ error: "account not found" }, 404);
+      }
+
+      if (!account.imap) {
+        return json({ error: "account has no imap settings" }, 422);
+      }
+
+      let connection: string | undefined;
+
+      try {
+        connection = await connect({
+          ...account.imap,
+          accessToken: account.accessToken,
+        });
+
+        const message = await getMessage(connection, folder, uid);
+
+        if (!message) {
+          return json({ error: "message not found" }, 404);
+        }
+
+        return json(
+          await analyzeEmailMessage({
+            date: message.date,
+            from: message.from,
+            subject: message.subject,
+            message: message.body ?? message.raw,
+          }),
+        );
+      } finally {
+        if (connection) {
+          await close(connection);
+        }
+      }
+    }
+
     const folderActionMatch = /^\/accounts\/([^/]+)\/folders\/([^/]+)$/
       .exec(url.pathname);
 
@@ -96,7 +146,7 @@ export async function handleRequest(request: Request): Promise<Response> {
         return json({ error: "account has no imap settings" }, 422);
       }
 
-      if (!body.markRead) {
+      if (body.markRead.length === 0) {
         return json({ email, folder, markedRead: 0, uids: [] });
       }
 
@@ -110,7 +160,7 @@ export async function handleRequest(request: Request): Promise<Response> {
 
         return json({
           email,
-          ...await markUnreadMessagesRead(connection, folder),
+          ...await markMessagesRead(connection, folder, body.markRead),
         });
       } finally {
         if (connection) {
@@ -208,11 +258,11 @@ export async function handleRequest(request: Request): Promise<Response> {
 
 async function readFolderAction(
   request: Request,
-): Promise<{ markRead?: boolean }> {
+): Promise<{ markRead: number[] }> {
   const body = await request.text();
 
   if (!body.trim()) {
-    return {};
+    return { markRead: [] };
   }
 
   let value: { markRead?: unknown };
@@ -225,12 +275,32 @@ async function readFolderAction(
 
   if (
     typeof value !== "object" || value === null ||
-    (value.markRead !== undefined && typeof value.markRead !== "boolean")
+    (value.markRead !== undefined && !isUidArray(value.markRead))
   ) {
     throw httpError("invalid request body", 400);
   }
 
-  return { markRead: value.markRead };
+  return { markRead: value.markRead ?? [] };
+}
+
+async function readMessageAction(request: Request): Promise<void> {
+  const body = await request.text();
+
+  if (!body.trim()) {
+    throw httpError("invalid request body", 400);
+  }
+
+  let value: { analyze?: unknown };
+
+  try {
+    value = JSON.parse(body) as { analyze?: unknown };
+  } catch {
+    throw httpError("invalid request body", 400);
+  }
+
+  if (typeof value !== "object" || value === null || value.analyze !== true) {
+    throw httpError("invalid request body", 400);
+  }
 }
 
 async function findAccount(email: string): Promise<GoaAccessToken | undefined> {
@@ -248,6 +318,11 @@ function httpError(
 function isHttpError(error: unknown): error is Error & { status: number } {
   return error instanceof Error && "status" in error &&
     typeof error.status === "number";
+}
+
+function isUidArray(value: unknown): value is number[] {
+  return Array.isArray(value) &&
+    value.every((item) => Number.isInteger(item) && item > 0);
 }
 
 function publicAccount(account: GoaAccessToken) {
