@@ -10,20 +10,10 @@ export type ImapConnectionOptions = {
 
 export type ImapConnectionId = string;
 
-export type ImapFolder = {
-  name: string;
-  delimiter: string | null;
-  attributes: string[];
-};
-
-export type ImapMessage = {
-  uid: number;
-  sequence: number;
-  flags: string[];
-  from?: string;
-  subject?: string;
-  date?: string;
-  messageId?: string;
+export type ImapCommandResult = {
+  tag: string;
+  status: string;
+  lines: string[];
 };
 
 type ImapConn = Deno.Conn | Deno.TlsConn;
@@ -33,12 +23,6 @@ type ImapState = {
   conn: ImapConn;
   nextTag: number;
   options: ImapConnectionOptions;
-};
-
-type ImapCommandResult = {
-  tag: string;
-  status: string;
-  lines: string[];
 };
 
 const connections = new Map<ImapConnectionId, ImapState>();
@@ -58,48 +42,19 @@ export async function connect(
   return id;
 }
 
-export async function listFolders(
+export async function command(
   connection: ImapConnectionId,
-): Promise<ImapFolder[]> {
-  const state = getConnection(connection);
-  const result = expectOk(await imapCommand(state, 'LIST "" "*"'));
-
-  return result.lines
-    .filter((line) => line.startsWith("* LIST "))
-    .map(parseListLine)
-    .filter((folder) => folder !== undefined);
+  value: string,
+): Promise<ImapCommandResult> {
+  return await imapCommand(getConnection(connection), value);
 }
 
-export async function listUnreadMessages(
-  connection: ImapConnectionId,
-  folder: string,
-): Promise<ImapMessage[]> {
-  const state = getConnection(connection);
-
-  expectOk(await imapCommand(state, `EXAMINE ${quoteString(folder)}`));
-
-  const search = expectOk(await imapCommand(state, "UID SEARCH UNSEEN"));
-  const uids = search.lines
-    .find((line) => line.startsWith("* SEARCH "))
-    ?.slice("* SEARCH ".length)
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean) ?? [];
-
-  if (uids.length === 0) {
-    return [];
+export function expectOk(result: ImapCommandResult): ImapCommandResult {
+  if (result.status !== "OK") {
+    throw new Error(result.lines.join("\n"));
   }
 
-  const fetch = expectOk(
-    await imapCommand(
-      state,
-      `UID FETCH ${
-        uids.join(",")
-      } (UID FLAGS BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])`,
-    ),
-  );
-
-  return parseMessages(fetch.lines);
+  return result;
 }
 
 export async function close(connection: ImapConnectionId): Promise<void> {
@@ -215,10 +170,10 @@ async function authenticate(state: ImapState): Promise<ImapCommandResult> {
 
 async function imapCommand(
   state: ImapState,
-  command: string,
+  value: string,
 ): Promise<ImapCommandResult> {
   const tag = nextTag(state);
-  await write(state, `${tag} ${command}\r\n`);
+  await write(state, `${tag} ${value}\r\n`);
 
   const lines: string[] = [];
 
@@ -254,14 +209,6 @@ async function readGreeting(state: ImapState): Promise<string> {
   }
 
   return greeting;
-}
-
-function expectOk(result: ImapCommandResult): ImapCommandResult {
-  if (result.status !== "OK") {
-    throw new Error(result.lines.join("\n"));
-  }
-
-  return result;
 }
 
 async function readLine(state: ImapState): Promise<string> {
@@ -304,98 +251,6 @@ function taggedResult(
   const [, status = ""] = last.split(" ", 2);
 
   return { tag, status, lines };
-}
-
-function parseListLine(line: string): ImapFolder | undefined {
-  const match = /^\* LIST \(([^)]*)\) (?:"([^"]*)"|NIL) "((?:\\"|[^"])*)"$/
-    .exec(line);
-
-  if (!match) {
-    return undefined;
-  }
-
-  return {
-    attributes: match[1] ? match[1].split(" ").filter(Boolean) : [],
-    delimiter: match[2] ?? null,
-    name: match[3].replaceAll('\\"', '"'),
-  };
-}
-
-function parseMessages(lines: string[]): ImapMessage[] {
-  const messages: ImapMessage[] = [];
-  let current: string[] = [];
-
-  for (const line of lines) {
-    if (/^\* \d+ FETCH /.test(line)) {
-      if (current.length > 0) {
-        messages.push(parseMessage(current));
-      }
-
-      current = [line];
-      continue;
-    }
-
-    if (current.length > 0) {
-      current.push(line);
-    }
-  }
-
-  if (current.length > 0) {
-    messages.push(parseMessage(current));
-  }
-
-  return messages;
-}
-
-function parseMessage(lines: string[]): ImapMessage {
-  const first = lines[0] ?? "";
-  const sequence = Number(/^\* (\d+) FETCH /.exec(first)?.[1] ?? 0);
-  const uid = Number(/\bUID (\d+)\b/.exec(first)?.[1] ?? 0);
-  const flags = /\bFLAGS \(([^)]*)\)/.exec(first)?.[1]
-    ?.split(" ")
-    .filter(Boolean) ?? [];
-  const headers = parseHeaders(lines.slice(1).join("\r\n"));
-
-  return {
-    uid,
-    sequence,
-    flags,
-    from: headers.get("from"),
-    subject: headers.get("subject"),
-    date: headers.get("date"),
-    messageId: headers.get("message-id"),
-  };
-}
-
-function parseHeaders(value: string): Map<string, string> {
-  const headers = new Map<string, string>();
-  let current = "";
-
-  for (const line of value.split(/\r?\n/)) {
-    if (line === ")" || line === "") {
-      continue;
-    }
-
-    if (/^\s/.test(line) && current) {
-      headers.set(current, `${headers.get(current) ?? ""} ${line.trim()}`);
-      continue;
-    }
-
-    const index = line.indexOf(":");
-
-    if (index === -1) {
-      continue;
-    }
-
-    current = line.slice(0, index).toLowerCase();
-    headers.set(current, line.slice(index + 1).trim());
-  }
-
-  return headers;
-}
-
-function quoteString(value: string): string {
-  return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
 
 function xoauth2InitialResponse(username: string, accessToken: string): string {
