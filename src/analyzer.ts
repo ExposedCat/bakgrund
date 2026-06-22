@@ -1,29 +1,79 @@
 import { generateJson } from "./llm.ts";
+import { getAnalyzerInstruction } from "./prompt.ts";
 
-export type EmailAnalysis = {
-  bucket:
-    | "ad"
-    | "promo"
-    | "notification"
-    | "action"
-    | "update"
-    | "signup"
-    | "event"
-    | "other";
-  importance: "critical" | "normal" | "low";
-  spam: boolean;
-  event: {
-    date: string;
-    title: string;
-    note: string | null;
-  } | null;
-  status: {
-    kind: "delivery" | "ticket" | "pipeline";
-    value: string;
-    access: string | null;
-    note: string | null;
-  } | null;
-};
+export type EmailAnalysis =
+  & {
+    importance: "very high" | "high" | "normal" | "low" | "very low";
+    spam: "absolute" | "possible" | "questionable" | null;
+  }
+  & (
+    | {
+      bucket: "delivery";
+      data: {
+        id: string | null;
+        title: string;
+        pickupCode: string | null;
+        accessCode: string | null;
+        expiryDate: string | null;
+        expectedDate: string | null;
+        status: string;
+        note: string | null;
+      };
+    }
+    | {
+      bucket: "ticket";
+      data: {
+        title: string;
+        filenames: string[];
+        note: string | null;
+      };
+    }
+    | {
+      bucket: "ad";
+      data: {
+        title: string;
+        coupons: string[] | null;
+        expiryDate: string | null;
+        note: string | null;
+      };
+    }
+    | {
+      bucket: "work";
+      data: {
+        company: string;
+        position: string | null;
+        status: string;
+        note: string | null;
+      };
+    }
+    | {
+      bucket: "event";
+      data: {
+        title: string;
+        date: string | null;
+        place: string | null;
+        note: string | null;
+      };
+    }
+    | {
+      bucket: "signup";
+      data: {
+        note: string | null;
+      };
+    }
+    | {
+      bucket: "human";
+      data: {
+        note: string;
+      };
+    }
+    | {
+      bucket: "other";
+      data: {
+        note: string;
+      };
+    }
+  );
 
 export type AnalyzeEmailMessage = {
   date?: string;
@@ -32,18 +82,6 @@ export type AnalyzeEmailMessage = {
   message: string;
 };
 
-const INSTRUCTIONS =
-  `Your goal is to analyze given email message by following criteria:
-- bucket: \`ad\` for generic ads or newsletters, \`promo\` for ads with some discount codes present, \`notification\` for service action notifications, such as replies or git notifications, \`action\` for emails requiring action, i.e. when there's some question or response is expected, \`update\` for policy changes, new features, etc., \`signup\` for login codes and service greetings, \`event\` for calendar events/meetings/reminders, \`other\` for those which don't match any other bucket.
-- importance: \`critical\` for high priority, \`normal\` for useful emails, \`low\` for garbage or status updates.
-
-Respond exactly with the following JSON:
-{ bucket, importance, spam, event, status}
-where:
-- spam: boolean, whether email is a spam and should be considered unsubscribing/blocking
-- event: nullable, only when email is an event; { date, title, note }; note is nullable, add it only when there's some important extra detail. Use null when the email is not an event.
-- status: nullable, only when email is a status; { kind, value, access, note }; kind is \`delivery\`, \`ticket\` or \`pipeline\`; value is current status name, access is nullable and should be only set when there are codes, tracking numbers, etc.; note is nullable, add it only when there's some important extra detail. Use null when the email has no status.`;
-
 const EMAIL_ANALYSIS_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -51,49 +89,140 @@ const EMAIL_ANALYSIS_SCHEMA = {
     bucket: {
       type: "string",
       enum: [
+        "delivery",
+        "ticket",
         "ad",
-        "promo",
-        "notification",
-        "action",
-        "update",
+        "work",
         "signup",
         "event",
+        "human",
         "other",
+      ],
+    },
+    data: {
+      anyOf: [
+        {
+          type: "object",
+          description: "Use when bucket is delivery.",
+          additionalProperties: false,
+          properties: {
+            id: { type: ["string", "null"] },
+            title: { type: "string" },
+            pickupCode: { type: ["string", "null"] },
+            accessCode: { type: ["string", "null"] },
+            expiryDate: { type: ["string", "null"] },
+            expectedDate: { type: ["string", "null"] },
+            status: { type: "string" },
+            note: { type: ["string", "null"] },
+          },
+          required: [
+            "id",
+            "title",
+            "pickupCode",
+            "accessCode",
+            "expiryDate",
+            "expectedDate",
+            "status",
+            "note",
+          ],
+        },
+        {
+          type: "object",
+          description: "Use when bucket is ticket.",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string" },
+            filenames: {
+              type: "array",
+              items: { type: "string" },
+            },
+            note: { type: ["string", "null"] },
+          },
+          required: ["title", "filenames", "note"],
+        },
+        {
+          type: "object",
+          description: "Use when bucket is ad.",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string" },
+            coupons: {
+              anyOf: [
+                {
+                  type: "array",
+                  items: { type: "string" },
+                },
+                { type: "null" },
+              ],
+            },
+            expiryDate: { type: ["string", "null"] },
+            note: { type: ["string", "null"] },
+          },
+          required: ["title", "coupons", "expiryDate", "note"],
+        },
+        {
+          type: "object",
+          description: "Use when bucket is work.",
+          additionalProperties: false,
+          properties: {
+            company: { type: "string" },
+            position: { type: ["string", "null"] },
+            status: { type: "string" },
+            note: { type: ["string", "null"] },
+          },
+          required: ["company", "position", "status", "note"],
+        },
+        {
+          type: "object",
+          description: "Use when bucket is event.",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string" },
+            date: { type: ["string", "null"] },
+            place: { type: ["string", "null"] },
+            note: { type: ["string", "null"] },
+          },
+          required: ["title", "date", "place", "note"],
+        },
+        {
+          type: "object",
+          description: "Use when bucket is signup.",
+          additionalProperties: false,
+          properties: {
+            note: { type: ["string", "null"] },
+          },
+          required: ["note"],
+        },
+        {
+          type: "object",
+          description: "Use when bucket is human.",
+          additionalProperties: false,
+          properties: {
+            note: { type: "string" },
+          },
+          required: ["note"],
+        },
+        {
+          type: "object",
+          description: "Use when bucket is other.",
+          additionalProperties: false,
+          properties: {
+            note: { type: "string" },
+          },
+          required: ["note"],
+        },
       ],
     },
     importance: {
       type: "string",
-      enum: ["critical", "normal", "low"],
+      enum: ["very high", "high", "normal", "low", "very low"],
     },
     spam: {
-      type: "boolean",
-    },
-    event: {
-      type: ["object", "null"],
-      additionalProperties: false,
-      properties: {
-        date: { type: "string" },
-        title: { type: "string" },
-        note: { type: ["string", "null"] },
-      },
-      required: ["date", "title", "note"],
-    },
-    status: {
-      type: ["object", "null"],
-      additionalProperties: false,
-      properties: {
-        kind: {
-          type: "string",
-          enum: ["delivery", "ticket", "pipeline"],
-        },
-        value: { type: "string" },
-        access: { type: ["string", "null"] },
-        note: { type: ["string", "null"] },
-      },
-      required: ["kind", "value", "access", "note"],
+      type: ["string", "null"],
+      enum: ["absolute", "possible", "questionable", null],
     },
   },
-  required: ["bucket", "importance", "spam", "event", "status"],
+  required: ["bucket", "data", "importance", "spam"],
 };
 
 export async function analyzeEmailMessage(
@@ -101,7 +230,7 @@ export async function analyzeEmailMessage(
 ): Promise<EmailAnalysis> {
   return await generateJson<EmailAnalysis>({
     name: "email_analysis",
-    instructions: INSTRUCTIONS,
+    instructions: getAnalyzerInstruction(),
     input: JSON.stringify(message, null, 2),
     schema: EMAIL_ANALYSIS_SCHEMA,
   });

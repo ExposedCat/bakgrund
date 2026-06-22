@@ -1,7 +1,7 @@
 {
   "tasks": {
-    "start": "deno run --env-file=.env --allow-env=AI_API_KEY,OPENAI_ADMIN_KEY,AI_API_BASE_URL,AI_MODEL,AI_TEMPERATURE --allow-run=busctl --allow-net src/main.ts",
-    "dev": "deno run --watch --env-file=.env --allow-env=AI_API_KEY,OPENAI_ADMIN_KEY,AI_API_BASE_URL,AI_MODEL,AI_TEMPERATURE --allow-run=busctl --allow-net src/main.ts",
+    "start": "deno run --env-file=.env --allow-env=OPENAI_ORG_ID,OPENAI_PROJECT_ID,OPENAI_WEBHOOK_SECRET,OPENAI_LOG,OPENAI_CUSTOM_HEADERS,AI_API_KEY,OPENAI_ADMIN_KEY,AI_API_BASE_URL,AI_MODEL,AI_TEMPERATURE --allow-run=busctl --allow-net src/main.ts",
+    "dev": "deno run --watch --env-file=.env --allow-env=OPENAI_ORG_ID,OPENAI_PROJECT_ID,OPENAI_WEBHOOK_SECRET,OPENAI_LOG,OPENAI_CUSTOM_HEADERS,AI_API_KEY,OPENAI_ADMIN_KEY,AI_API_BASE_URL,AI_MODEL,AI_TEMPERATURE --allow-run=busctl --allow-net src/main.ts",
     "check": "deno fmt --check && deno lint && deno check src/*.ts"
   },
   "imports": {
