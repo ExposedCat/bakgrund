@@ -8,6 +8,7 @@ const OAUTH2_IFACE = "org.gnome.OnlineAccounts.OAuth2Based";
 const PROPERTIES_IFACE = "org.freedesktop.DBus.Properties";
 
 export type GoaAccessToken = {
+  id: string;
   email: string;
   accessToken: string;
   imap?: GoaMailConnection;
@@ -71,6 +72,7 @@ export async function getGoaAccessTokens(): Promise<GoaAccessToken[]> {
 
     if (typeof accessToken === "string") {
       tokens.push({
+        id: path.slice(GOA_ACCOUNTS.length),
         email,
         accessToken,
         ...interfaces.includes(MAIL_IFACE)

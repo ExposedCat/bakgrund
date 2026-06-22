@@ -1,6 +1,11 @@
-    export  const getAnalyzerInstruction = () =>
-`# Meta
-Currently it's ${Temporal.Now.zonedDateTimeISO().toLocaleString("en-SE", { dateStyle: "short", timeStyle: "short" })}
+export const getAnalyzerInstruction = () =>
+  `# Meta
+Currently it's ${
+    Temporal.Now.zonedDateTimeISO().toLocaleString("en-SE", {
+      dateStyle: "short",
+      timeStyle: "short",
+    })
+  }
 
 # Goal
 Your goal is to analyze given email message and produce a formatted JSON based on message type.
@@ -42,4 +47,4 @@ Spam is nullable and should only be non-null for spam emails:
 - "absolute": absolute spam, email should be auto-marked and deleted.
 - "possible": likely a spam, should go to spam bucket but not deleted for some time.
 - "questionable": seems like a spam, but requires verification.
-`
+`;

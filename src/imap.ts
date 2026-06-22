@@ -11,6 +11,7 @@ export type ImapConnectionOptions = {
 export type ImapConnectionId = string;
 
 export type ImapCommandResult = {
+  command: string;
   tag: string;
   status: string;
   lines: string[];
@@ -51,7 +52,9 @@ export async function command(
 
 export function expectOk(result: ImapCommandResult): ImapCommandResult {
   if (result.status !== "OK") {
-    throw new Error(result.lines.join("\n"));
+    throw new Error(
+      `IMAP command failed: ${result.command}\n${result.lines.join("\n")}`,
+    );
   }
 
   return result;
@@ -163,7 +166,7 @@ async function authenticate(state: ImapState): Promise<ImapCommandResult> {
     const result = taggedResult(tag, lines);
 
     if (result) {
-      return expectOk(result);
+      return expectOk({ ...result, command: "AUTHENTICATE XOAUTH2" });
     }
   }
 }
@@ -184,7 +187,7 @@ async function imapCommand(
     const result = taggedResult(tag, lines);
 
     if (result) {
-      return result;
+      return { ...result, command: value };
     }
   }
 }
@@ -241,7 +244,7 @@ function nextTag(state: ImapState): string {
 function taggedResult(
   tag: string,
   lines: string[],
-): ImapCommandResult | undefined {
+): Omit<ImapCommandResult, "command"> | undefined {
   const last = lines.at(-1);
 
   if (!last?.startsWith(`${tag} `)) {

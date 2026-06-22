@@ -1,10 +1,13 @@
 {
   "tasks": {
-    "start": "deno run --env-file=.env --allow-env=OPENAI_ORG_ID,OPENAI_PROJECT_ID,OPENAI_WEBHOOK_SECRET,OPENAI_LOG,OPENAI_CUSTOM_HEADERS,AI_API_KEY,OPENAI_ADMIN_KEY,AI_API_BASE_URL,AI_MODEL,AI_TEMPERATURE --allow-run=busctl --allow-net src/main.ts",
-    "dev": "deno run --watch --env-file=.env --allow-env=OPENAI_ORG_ID,OPENAI_PROJECT_ID,OPENAI_WEBHOOK_SECRET,OPENAI_LOG,OPENAI_CUSTOM_HEADERS,AI_API_KEY,OPENAI_ADMIN_KEY,AI_API_BASE_URL,AI_MODEL,AI_TEMPERATURE --allow-run=busctl --allow-net src/main.ts",
+    "start": "deno run --env-file=.env --allow-env=OPENAI_ORG_ID,OPENAI_PROJECT_ID,OPENAI_WEBHOOK_SECRET,OPENAI_LOG,OPENAI_CUSTOM_HEADERS,AI_API_KEY,OPENAI_ADMIN_KEY,AI_API_BASE_URL,AI_MODEL,AI_TEMPERATURE,SQLITE_PATH,DENO_SQLITE_PATH,DENO_SQLITE_LOCAL,DENO_DIR,XDG_CACHE_HOME,HOME --allow-read --allow-write --allow-ffi --allow-run=busctl --allow-net src/main.ts",
+    "dev": "deno run --watch --env-file=.env --allow-env=OPENAI_ORG_ID,OPENAI_PROJECT_ID,OPENAI_WEBHOOK_SECRET,OPENAI_LOG,OPENAI_CUSTOM_HEADERS,AI_API_KEY,OPENAI_ADMIN_KEY,AI_API_BASE_URL,AI_MODEL,AI_TEMPERATURE,SQLITE_PATH,DENO_SQLITE_PATH,DENO_SQLITE_LOCAL,DENO_DIR,XDG_CACHE_HOME,HOME --allow-read --allow-write --allow-ffi --allow-run=busctl --allow-net src/main.ts",
     "check": "deno fmt --check && deno lint && deno check src/*.ts"
   },
   "imports": {
+    "@db/sqlite": "jsr:@db/sqlite@^0.13.0",
+    "@kysely/kysely": "jsr:@kysely/kysely@0.28.17",
+    "@marshift/kysely-deno-sqlite3": "jsr:@marshift/kysely-deno-sqlite3@^1.0.0",
     "@openai/openai": "jsr:@openai/openai@^6.38.0"
   }
 }
